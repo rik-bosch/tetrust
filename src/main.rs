@@ -7,6 +7,7 @@ use std::time::Duration;
 use sdl2::rect::Rect;
 use sdl2::video::Window;
 
+#[derive(Clone)]
 enum Direction {
     Up,
     Down,
@@ -14,6 +15,7 @@ enum Direction {
     Right,
 }
 
+#[derive(Clone)]
 struct Vector2 {
     x: i32,
     y: i32,
@@ -38,6 +40,7 @@ impl Vector2 {
     }
 }
 
+#[derive(Clone)]
 struct Model {
     block_pos: Vector2,
     running: bool,
@@ -50,6 +53,7 @@ fn init() -> Model {
     }
 }
 
+#[derive(Clone)]
 enum Msg {
     MoveBlock(Direction),
     Quit
@@ -81,7 +85,7 @@ impl Action for KeyDownAction {
     fn check_action(&self, event: &Event) -> Option<Msg> {
         if let Event::KeyDown { keycode: Some(pressed_key), .. } = event {
             if self.action_keys.contains(pressed_key) {
-                return Some(self.msg);
+                return Some(self.msg.clone());
             }
         }
         None
@@ -95,7 +99,7 @@ struct QuitAction {
 impl Action for QuitAction {
     fn check_action(&self, event: &Event) -> Option<Msg> {
         match event {
-            Event::Quit { .. } => Some(self.msg),
+            Event::Quit { .. } => Some(self.msg.clone()),
             _ => None,
         }
     }
@@ -112,7 +116,7 @@ impl View {
         self.canvas.set_draw_color(Color::RGB(255, 0, 0));
         self.canvas.fill_rect(
             Rect::new(model.block_pos.x, model.block_pos.y, 100, 100)
-        );
+        ).expect("Could not fill rect for model.block_pos");
         self.canvas.present();
 
         vec![
@@ -170,7 +174,7 @@ pub fn main() {
                 }
             }
         }
-        actions = view.update(model);
+        actions = view.update(&model);
         
         ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
     }
