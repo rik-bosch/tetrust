@@ -4,10 +4,8 @@ use sdl2::pixels::Color;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use std::time::Duration;
-use sdl2::rect::Rect;
 use sdl2::video::Window;
 
-#[derive(Clone)]
 enum Direction {
     Up,
     Down,
@@ -15,7 +13,6 @@ enum Direction {
     Right,
 }
 
-#[derive(Clone)]
 struct Vector2 {
     x: i32,
     y: i32,
@@ -40,7 +37,6 @@ impl Vector2 {
     }
 }
 
-#[derive(Clone)]
 struct Model {
     block_pos: Vector2,
     running: bool,
@@ -53,55 +49,37 @@ fn init() -> Model {
     }
 }
 
-#[derive(Clone)]
 enum Msg {
     MoveBlock(Direction),
     Quit
 }
 
 impl Model {
-    fn update(&self, msg: Msg) -> Model {
+    fn update(self, msg: Msg) -> Model {
         match msg {
             Msg::MoveBlock(dir) => {
-                Model { block_pos: self.block_pos.move_in_dir(dir, 1), ..self.clone() }
+                Model { block_pos: self.block_pos.move_in_dir(dir, 1), ..self }
             }
             Msg::Quit => {
-                Model { running: false, ..self.clone() }
+                Model { running: false, ..self }
             }
         }
     }
 }
 
-trait Action {
-    fn check_action(&self, event: &Event) -> Option<Msg>;
-}
-
-struct KeyDownAction {
-    msg: Msg,
-    action_keys: Vec<Keycode>,
-}
-
-impl Action for KeyDownAction {
-    fn check_action(&self, event: &Event) -> Option<Msg> {
-        if let Event::KeyDown { keycode: Some(pressed_key), .. } = event {
-            if self.action_keys.contains(pressed_key) {
-                return Some(self.msg.clone());
-            }
+fn action_keydown(event: &Event, msg: Msg, action_keys: Vec<Keycode>) -> Option<Msg> {
+    if let Event::KeyDown { keycode: Some(pressed_key), .. } = event {
+        if action_keys.contains(pressed_key) {
+            return Some(msg);
         }
-        None
     }
+    None
 }
 
-struct QuitAction {
-    msg: Msg,
-}
-
-impl Action for QuitAction {
-    fn check_action(&self, event: &Event) -> Option<Msg> {
-        match event {
-            Event::Quit { .. } => Some(self.msg.clone()),
-            _ => None,
-        }
+fn action_quit(event: &Event, msg: Msg) -> Option<Msg> {
+    match event {
+        Event::Quit { .. } => Some(msg),
+        _ => None,
     }
 }
 
@@ -110,39 +88,22 @@ struct View {
 }
 
 impl View {
-    fn update(&mut self, model: &Model) -> Vec<Box<dyn Action>> {
+    fn update(&mut self, model: &Model) -> Vec<Box<dyn FnOnce(&Event) -> Option<Msg>>> {
         self.canvas.set_draw_color(Color::RGB(0, 0, 0));
         self.canvas.clear();
         self.canvas.set_draw_color(Color::RGB(255, 0, 0));
         self.canvas.fill_rect(
-            Rect::new(model.block_pos.x, model.block_pos.y, 100, 100)
+            sdl2::rect::Rect::new(model.block_pos.x, model.block_pos.y, 100, 100)
         ).expect("Could not fill rect for model.block_pos");
         self.canvas.present();
 
         vec![
-            Box::new(QuitAction {
-                msg: Msg::Quit
-            }),
-            Box::new(KeyDownAction{
-                msg: Msg::Quit,
-                action_keys: vec![Keycode::Escape]
-            }),
-            Box::new(KeyDownAction{
-                msg: Msg::MoveBlock(Direction::Up),
-                action_keys: vec![Keycode::Up]
-            }),
-            Box::new(KeyDownAction{
-                msg: Msg::MoveBlock(Direction::Down),
-                action_keys: vec![Keycode::Down]
-            }),
-            Box::new(KeyDownAction{
-                msg: Msg::MoveBlock(Direction::Left),
-                action_keys: vec![Keycode::Left]
-            }),
-            Box::new(KeyDownAction{
-                msg: Msg::MoveBlock(Direction::Right),
-                action_keys: vec![Keycode::Right]
-            }),
+            Box::new(|event| action_quit(event, Msg::Quit)),
+            Box::new(|event| action_keydown(event, Msg::Quit, vec![Keycode::Escape])),
+            Box::new(|event| action_keydown(event, Msg::MoveBlock(Direction::Up), vec![Keycode::Up])),
+            Box::new(|event| action_keydown(event, Msg::MoveBlock(Direction::Down), vec![Keycode::Down])),
+            Box::new(|event| action_keydown(event, Msg::MoveBlock(Direction::Left), vec![Keycode::Left])),
+            Box::new(|event| action_keydown(event, Msg::MoveBlock(Direction::Right), vec![Keycode::Right])),
         ]
     }
 }
@@ -160,22 +121,21 @@ pub fn main() {
     let mut view = View {
         canvas: window.into_canvas().build().unwrap()
     };
-    let mut actions: Vec<Box<dyn Action>> = view.update(&model);
+    let mut actions = view.update(&model);
 
     let mut event_pump = sdl_context.event_pump().unwrap();
     'running: loop {
         for event in event_pump.poll_iter() {
-            for action in actions.iter() {
-                if let Some(msg) = action.check_action(&event) {
-                    model = model.update(msg)
-                }
-                if !model.running {
-                    break 'running;
+            while let Some(action) = actions.pop() {
+                if let Some(msg) = action(&event) {
+                    model = model.update(msg);
+                    if !model.running {
+                        break 'running;
+                    }
                 }
             }
         }
         actions = view.update(&model);
-        
         ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
     }
 }
