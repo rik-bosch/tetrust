@@ -39,29 +39,43 @@ impl Vector2 {
 
 struct Model {
     block_pos: Vector2,
+    canvas_size: Vector2,
     running: bool,
 }
 
-fn init() -> Model {
-    Model {
-        block_pos: Vector2{ x: 0, y: 0 },
-        running: true
-    }
+fn init() -> (Model, Cmd) {
+    (
+        Model {
+            block_pos: Vector2{ x: 0, y: 0 },
+            canvas_size: Vector2{ x: 200, y: 200 },
+            running: true
+        },
+        Cmd::GetCanvasSize
+    )
 }
 
 enum Msg {
     MoveBlock(Direction),
+    SetCanvasSize(Vector2),
     Quit
 }
 
+enum Cmd {
+    None,
+    GetCanvasSize
+}
+
 impl Model {
-    fn update(self, msg: Msg) -> Model {
+    fn update(self, msg: Msg) -> (Model, Cmd) {
         match msg {
             Msg::MoveBlock(dir) => {
-                Model { block_pos: self.block_pos.move_in_dir(dir, 1), ..self }
+                (Model { block_pos: self.block_pos.move_in_dir(dir, 1), ..self }, Cmd::None)
+            }
+            Msg::SetCanvasSize(canvas_size) => {
+                (Model { canvas_size, ..self }, Cmd::None)
             }
             Msg::Quit => {
-                Model { running: false, ..self }
+                (Model { running: false, ..self }, Cmd::None)
             }
         }
     }
@@ -89,12 +103,23 @@ struct View {
 
 impl View {
     fn update(&mut self, model: &Model) -> Vec<Box<dyn FnOnce(&Event) -> Option<Msg>>> {
-        self.canvas.set_draw_color(Color::RGB(0, 0, 0));
+        // Clear screen.
+        self.canvas.set_draw_color(Color::RGB(255, 255, 255));
         self.canvas.clear();
+
+        // Draw border.
+        self.canvas.set_draw_color(Color::RGB(0, 0, 0));
+        self.canvas.draw_rect(
+            sdl2::rect::Rect::new(10, 10, (model.canvas_size.x - 20) as u32, (model.canvas_size.y - 20) as u32)
+        ).expect("Could not draw border rect");
+
+        // Draw 'player' rect.
         self.canvas.set_draw_color(Color::RGB(255, 0, 0));
         self.canvas.fill_rect(
             sdl2::rect::Rect::new(model.block_pos.x, model.block_pos.y, 100, 100)
         ).expect("Could not fill rect for model.block_pos");
+
+        // Do rendering.
         self.canvas.present();
 
         vec![
@@ -108,6 +133,20 @@ impl View {
     }
 }
 
+fn parse_command(cmd: Cmd, model: Model, view: &View) -> Model {
+    match cmd {
+        Cmd::GetCanvasSize => {
+            let (x, y) = view.canvas.output_size().expect("Could not get output size");
+            let msg = Msg::SetCanvasSize(Vector2 { x: x as i32, y: y as i32 });
+            let (new_model, new_cmd) = model.update(msg);
+            parse_command(new_cmd, new_model, view)
+        }
+        _ => {
+            model
+        }
+    }
+}
+
 pub fn main() {
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
@@ -117,10 +156,11 @@ pub fn main() {
         .build()
         .unwrap();
 
-    let mut model = init();
+    let (mut model, mut cmd) = init();
     let mut view = View {
         canvas: window.into_canvas().build().unwrap()
     };
+    model = parse_command(cmd, model, &view);
     let mut actions = view.update(&model);
 
     let mut event_pump = sdl_context.event_pump().unwrap();
@@ -128,7 +168,8 @@ pub fn main() {
         for event in event_pump.poll_iter() {
             while let Some(action) = actions.pop() {
                 if let Some(msg) = action(&event) {
-                    model = model.update(msg);
+                    (model, cmd) = model.update(msg);
+                    model = parse_command(cmd, model, &view);
                     if !model.running {
                         break 'running;
                     }
